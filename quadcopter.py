@@ -12,6 +12,7 @@ from math import *
 from simple_pid import PID
 import time
 from Vizualize import QuadPlot
+from nmpc_control import NMPC
 
 class Quadcopter:
 
@@ -159,6 +160,69 @@ class Quadcopter:
         xdot += force_xdot
 
         return xdot
+    
+    def get_SS(self):
+        # Unpack state
+        pn = self.x[0]
+        pe = self.x[1]
+        pd = self.x[2]
+        u = self.x[3]
+        v = self.x[4]
+        w = self.x[5]
+        phi = self.x[6]
+        theta = self.x[7]
+        psi = self.x[8]
+        p = self.x[9]
+        q = self.x[10]
+        r = self.x[11]
+
+        # Calc trigs
+        cp = cos(phi)
+        sp = sin(phi)
+        ct = cos(theta)
+        st = sin(theta)
+        tt = tan(theta)
+        cpsi = cos(psi)
+        spsi = sin(psi)
+
+        # Compute Ac.
+        A = np.zeros((12, 12))
+
+        R_bi = np.array([[ct*cpsi, ct*spsi, -st],
+                        [sp*st*cpsi-cp*spsi, sp*st*spsi+cp*cpsi, sp*ct],
+                        [cp*st*cpsi+sp*spsi, cp*st*spsi-sp*cpsi, cp*ct]])
+        A[0:3, 3:6] = R_bi.T
+
+        A22 = np.array([[0.0, r/2.0, -q/2.0],
+                        [-r/2.0, 0.0, p/2.0],
+                        [q/2.0, -p/2.0, 0.0]])
+        A[3:6, 3:6] = A22
+
+        A23 = np.array([[0.0, -self.g*(1.0 - theta*theta/6.0 + (theta**4)/120.), 0.0],
+                        [self.g*ct*(1.0 - phi*phi/6.0 + (phi**4)/120.), 0.0, 0.0],
+                        [self.g*((ct + 1.0)/2.0)*(-phi/2.0 + (phi**3)/24.0 - (phi**5)/720.0), 
+                            self.g*((cp + 1.0)/2.0)*(-theta/2.0 + (theta**3)/24.0 - (theta**5)/720.),
+                            0.0]])
+        A[3:6, 6:9] = A23
+
+        A24 = np.array([[0.0, -w/2.0, v/2.0],
+                        [w/2.0, 0.0, -u/2.0],
+                        [-v/2.0, u/2.0, 0.0]])
+        A[3:6, 9:12] = A24
+
+        W = np.array([[1.0, sp*st/ct, cp*st/ct],
+                      [0.0, cp, -sp],
+                      [0.0, sp/ct, cp/ct]])
+        A[6:9, 9:12] = W
+
+        A44 = np.array([[0.0, (self.Jy - self.Jz)*r/(2.0*self.Jx), (self.Jy - self.Jz)*q/(2.0*self.Jx)],
+                        [(self.Jz - self.Jx)*r/(2.0*self.Jy), 0.0, (self.Jz - self.Jx)*p/(2.0*self.Jy)],
+                        [(self.Jx - self.Jy)*q/(2.0*self.Jz), (self.Jx - self.Jy)*p/(2.0*self.Jz), 0.0]])
+        A[9:12, 9:12] = A44
+
+        B = np.copy(self.Bc)
+
+        return A, B
 
     def sat(self, x, _max, _min):
         if (x > _max):
@@ -188,6 +252,7 @@ if __name__ == '__main__':
     # init path_manager_base object
     quad = Quadcopter()
     plotter = QuadPlot()
+    controller = NMPC()
 
     # Lets Fly :)
     dt = 0.01
@@ -201,15 +266,24 @@ if __name__ == '__main__':
                      [throttle_eq],
                      [throttle_eq]])
 
+
     for i in range(10000):
         t += dt
-        quad.force_and_moments(u_eq, dt)
+
+        # Compute control
+        u = controller.compute_control(quad, u_eq)
+        # print "control u: ", u
+
+        # Take a step with control
+        quad.force_and_moments(u + u_eq, dt)
+
         if (i%10 == 0):
             plotter.plot(quad.x)
             print "--------------------"
             print "iteration #", i
+            print "time: ", t
             print "pos:", quad.x[0], quad.x[1], quad.x[2], quad.x[5]
             print "rot:", quad.x[6], quad.x[7], quad.x[8]
-            print "time: ", t
+            print "Control: ", u
         else:
             time.sleep(0.01)
