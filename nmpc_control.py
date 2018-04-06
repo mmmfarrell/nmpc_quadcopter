@@ -22,26 +22,33 @@ class NMPC(object):
         self.nu = 4 # number of control inputs
         
         # Cost function parameters
-        self.Q = np.eye(12)
+        self.Q = np.eye(12)*0.001
         # self.Q = np.zeros((12,12))
-        self.Q[0, 0] = 1.0
-        self.Q[1, 1] = 1.0
-        self.Q[2, 2] = 1.0
+        # Positions
+        self.Q[0, 0] = 100.0
+        self.Q[1, 1] = 100.0
+        self.Q[2, 2] = 1e4
+        # Angles
+        # self.Q[6, 6] = 100.0
+        # self.Q[7, 7] = 100.0
+        self.Q[8, 8] = 100.0
         # self.Q = np.diag([0.0, 1.0, 1.0, 0.0]) # Matrix for quadratic cost function with state
-        self.R = np.diag([0.001, 0.001, 0.001, 0.001]) # Matrix for quadratic cost function with inputs
+        # self.R = np.diag([0.001, 0.001, 0.001, 0.001]) # Matrix for quadratic cost function with inputs
+        # self.R = np.eye(4)*1e-5
+        self.R = np.zeros((4,4))
 
         # Time parameters
         self.T = 25 # horizon length
-        self.delta_t = 0.01 # time steps
+        self.delta_t = 0.05 # time steps
 
         # Set reference position
-        self.xr = np.zeros((12,1))
-        self.xr[2] = 10.0
+        # self.xr = np.zeros((12,1))
+        # self.xr[2] = 10.0
 
-    def compute_control(self, quad, u_eq):
+    def compute_control(self, quad, u_eq, xr):
+        ox, dx, otheta, dtheta, ou = self.mpc_control(quad, u_eq, xr)
         try:
             # Compute control given current state
-            ox, dx, otheta, dtheta, ou = self.mpc_control(quad, u_eq)
             # print "ou: ", ou
             u = ou[:, 0]
         except:
@@ -50,7 +57,7 @@ class NMPC(object):
 
         return u
 
-    def mpc_control(self, quad, u_eq):
+    def mpc_control(self, quad, u_eq, xr):
 
         # Define optimzation variables
         x = cvxpy.Variable(self.nx, self.T + 1) # size of variable 4 x (T+1)
@@ -58,31 +65,35 @@ class NMPC(object):
 
         # Get SS representation of dynamics
         A, B = quad.get_SS()
-        C = np.identity(12)
-        D = np.zeros((12,4))
-        cont_sys = control.StateSpace(A, B, C, D)
-        discrete_sys = control.matlab.c2d(cont_sys, self.delta_t)
+        # C = np.identity(12)
+        # D = np.zeros((12,4))
+        # cont_sys = control.StateSpace(A, B, C, D)
+        # discrete_sys = control.matlab.c2d(cont_sys, self.delta_t)
 
-        A = discrete_sys.A
-        B = discrete_sys.B
+        # A = discrete_sys.A
+        # B = discrete_sys.B
 
         cost = 0.0
         constr = []
 
         # Loop through horizon
         for t in range(self.T):
-            cost += cvxpy.quad_form(x[:, t + 1] - self.xr, self.Q) # This does xT * Q * x
+            cost += cvxpy.quad_form(x[:, t + 1] - xr[:, t ], self.Q) # This does xT * Q * x
             cost += cvxpy.quad_form(u[:, t], self.R) # This does uT * R * u
-            constr += [x[:, t + 1] == A * x[:, t] + B * (u[:, t] + u_eq)] # Contraint to follow dynamics
-            # constr += [x[:, t + 1] == self.pend.get_discrete_step(x[:, t], u[:, t], self.delta_t)] # Contraint to follow dynamics
+            constr += [x[:, t + 1] == x[:, t] + self.delta_t*(A * x[:, t] + B * (u[:, t] + u_eq))] # Contraint to follow dynamics
+            # constr += [x[:, t + 1] == A * x[:, t] + B * (u[:, t] + u_eq)] # Contraint to follow dynamics
 
-            # # Constrain x position to be between -5, 5
-            # constr += [(x[0, t + 1]) <= 5.0]
-            # constr += [(x[0, t + 1]) >= -5.0]
+            # Contrain angles
+            constr += [x[6, t + 1] <= np.pi]
+            constr += [x[6, t + 1] >= -np.pi]
+            constr += [x[7, t + 1] <= np.pi/2.0]
+            constr += [x[7, t + 1] >= -np.pi/2.0]
+            constr += [x[8, t + 1] <= np.pi]
+            constr += [x[8, t + 1] >= -np.pi]
 
-            # # Constrain u force 
-            # constr += [u[:, t + 1] <= 10.0]
-            # constr += [u[:, t + 1] >= -10.0]
+            # Constrain u force 
+            constr += [u[:, t] <= 1.96]
+            constr += [u[:, t] >= -1.96]
         constr += [x[:, 0] == quad.x] # Contraint for initial conditions
 
         # Create cvxpy optimization problem
@@ -107,6 +118,7 @@ class NMPC(object):
 
         else:
             print("ERROR: Optimization not OPTIMAL")
+            print ("Status", prob.status)
             return 0, 0, 0, 0, 0
 
 

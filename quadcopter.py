@@ -14,6 +14,9 @@ import time
 from Vizualize import QuadPlot
 from nmpc_control import NMPC
 
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
 class Quadcopter:
 
     def __init__(self, x_init=None):
@@ -86,12 +89,18 @@ class Quadcopter:
 
     def force_and_moments(self, u, dt):
 
-        k1 = self.derivatives(self.x, u)
-        k2 = self.derivatives(self.x + (dt/2.)*k1, u)
-        k3 = self.derivatives(self.x + (dt/2.)*k2, u)
-        k4 = self.derivatives(self.x + (dt)*k3, u)
+        # k1 = self.derivatives(self.x, u)
+        # k2 = self.derivatives(self.x + (dt/2.)*k1, u)
+        # k3 = self.derivatives(self.x + (dt/2.)*k2, u)
+        # k4 = self.derivatives(self.x + (dt)*k3, u)
 
-        self.x += (dt/6.)*(k1 + 2*k2 + 2*k3 + k4)
+        # self.x += (dt/6.)*(k1 + 2*k2 + 2*k3 + k4)
+
+        for i in range(0, 10):
+            self.x += (dt/10.)*self.derivatives(self.x, u)
+
+        # A, B = self.get_SS()
+        # self.x += dt*(A.dot(quad.x) + B.dot(u))
 
     def derivatives(self, state, F):
 
@@ -243,6 +252,90 @@ class Forces:
         self.Fy = 0.0
         self.Fz = 0.0
 
+def make_ref_traj(dt):
+
+    # choose trajetory
+    traj = 4
+
+    if traj == 0:
+        # hold 0 position
+        T = 10.0
+        steps = int(T/dt)
+        xr = np.zeros((12, 30*steps))
+        xr[2, :] = -10.0
+        xr[2, 2*steps:] = 0.0
+    elif traj == 1:
+        # Straight up trajectory for 10m, 10seconds
+        T = 10.0
+        steps = int(T/dt)
+
+        north_steps = np.linspace(0.0, 10.0, steps)
+
+        xr = np.zeros((12, 30*steps))
+        xr[2, 0:steps] = -north_steps
+        xr[2, steps:] = -10.0
+    elif traj == 2:
+        # Straight north trajectory for 10m, 10seconds
+        T = 4.0
+        steps = int(T/dt)
+
+        north_steps = np.linspace(0.0, 10.0, steps)
+
+        xr = np.zeros((12, steps + 50))
+        xr[0, 0:steps] = north_steps
+        # xr[7, 0:steps] = np.pi/6.0
+        xr[0, steps:] = 10.0
+    elif traj == 3:
+        # Straight north trajectory for 10m, 10seconds
+        T = 4.0
+        steps = int(T/dt)
+
+        north_steps = np.linspace(0.0, 10.0, steps)
+
+        xr = np.zeros((12, 5*steps + 50))
+        xr[0, :] = 10.0
+        xr[0, 0:steps] = north_steps
+
+        # Make a ciricle of Radius 10
+        theta = np.linspace(0.0, 2*np.pi, 4*steps)
+        north = np.zeros_like(theta)
+        east = np.zeros_like(theta)
+
+        for i in range(len(theta)):
+            north[i] = 10.0 * cos(theta[i])
+            east[i] = 10.0 * sin(theta[i])
+
+        xr[0, steps:5*steps] = north
+        xr[1, steps:5*steps] = east
+        # xr[8, steps:5*steps] = theta
+    elif traj == 4:
+        # Spiral
+        T = 10.0
+        steps = int(T/dt)
+
+        north_steps = np.linspace(0.0, 10.0, steps)
+
+        xr = np.zeros((12, 5*steps + 50))
+        xr[0, :] = 10.0
+        xr[0, 0:steps] = north_steps
+
+        # Make a ciricle of Radius 10
+        theta = np.linspace(0.0, 2*np.pi, 4*steps)
+        north = np.zeros_like(theta)
+        east = np.zeros_like(theta)
+        down = np.linspace(0.0, -10.0, 4*steps)
+
+        for i in range(len(theta)):
+            north[i] = 10.0 * cos(theta[i])
+            east[i] = 10.0 * sin(theta[i])
+
+        xr[0, steps:5*steps] = north
+        xr[1, steps:5*steps] = east
+        xr[2, steps:5*steps] = down
+        # xr[8, steps:5*steps] = theta
+
+    return xr
+
 
 ##############################
 #### Main Function to Run ####
@@ -255,8 +348,10 @@ if __name__ == '__main__':
     controller = NMPC()
 
     # Lets Fly :)
-    dt = 0.01
+    dt = 0.05
     t = 0.0
+
+    xr = make_ref_traj(dt)
 
     # Altitude Hold
     throttle_eq = quad.mass*9.8/4.0 
@@ -266,24 +361,53 @@ if __name__ == '__main__':
                      [throttle_eq],
                      [throttle_eq]])
 
+    # Plot results
+    PLOT = True
+    if PLOT:
+        x_result = np.zeros((12,1))
 
-    for i in range(10000):
+    for i in range(len(xr[0,:]) - 25):
         t += dt
 
         # Compute control
-        u = controller.compute_control(quad, u_eq)
+        start = time.time()
+        u = controller.compute_control(quad, u_eq, xr[:,i:i+26])
+        end = time.time()
+        print "time to compute: ", end - start
         # print "control u: ", u
 
         # Take a step with control
         quad.force_and_moments(u + u_eq, dt)
 
-        if (i%10 == 0):
+        if PLOT:
+            # x_result.append(quad.x)
+            x_result = np.hstack((x_result, quad.x))
+            # print "results shape: ", x_result.shape
+
+        if True:#(i%10 == 0):
             plotter.plot(quad.x)
             print "--------------------"
             print "iteration #", i
             print "time: ", t
+            print "reference loc: ", xr[:,i]
             print "pos:", quad.x[0], quad.x[1], quad.x[2], quad.x[5]
             print "rot:", quad.x[6], quad.x[7], quad.x[8]
             print "Control: ", u
-        else:
-            time.sleep(0.01)
+
+    if PLOT:
+        x_result_north = x_result[0,:]
+        x_result_east = x_result[1,:]
+        x_result_down = x_result[2,:]
+        x_r_north = xr[0,:]
+        x_r_east = xr[1,:]
+        x_r_down = xr[2,:]
+
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        plt.plot(x_r_east, x_r_north, -x_r_down, 'b')
+        plt.plot(x_result_east, x_result_north, -x_result_down, 'r')
+        plt.xlabel('East (m)')
+        plt.ylabel('North (m)')
+        plt.axis('equal')
+        plt.legend(['Trajectory', 'Result'])
+        plt.show()
