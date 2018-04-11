@@ -170,6 +170,69 @@ class Quadcopter:
 
         return xdot
     
+    def get_SS_linear(self):
+        # Unpack state
+        # pn = self.x[0]
+        # pe = self.x[1]
+        # pd = self.x[2]
+        u = 0.0
+        v = 0.0
+        w = 0.0
+        phi = 0.0
+        theta = 0.0
+        psi = 0.0
+        p = 0.0
+        q = 0.0
+        r = 0.0
+
+        # Calc trigs
+        cp = cos(phi)
+        sp = sin(phi)
+        ct = cos(theta)
+        st = sin(theta)
+        tt = tan(theta)
+        cpsi = cos(psi)
+        spsi = sin(psi)
+
+        # Compute Ac.
+        A = np.zeros((12, 12))
+
+        R_bi = np.array([[ct*cpsi, ct*spsi, -st],
+                        [sp*st*cpsi-cp*spsi, sp*st*spsi+cp*cpsi, sp*ct],
+                        [cp*st*cpsi+sp*spsi, cp*st*spsi-sp*cpsi, cp*ct]])
+        A[0:3, 3:6] = R_bi.T
+
+        A22 = np.array([[0.0, r/2.0, -q/2.0],
+                        [-r/2.0, 0.0, p/2.0],
+                        [q/2.0, -p/2.0, 0.0]])
+        A[3:6, 3:6] = A22
+
+        A23 = np.array([[0.0, -self.g*(1.0 - theta*theta/6.0 + (theta**4)/120.), 0.0],
+                        [self.g*ct*(1.0 - phi*phi/6.0 + (phi**4)/120.), 0.0, 0.0],
+                        [self.g*((ct + 1.0)/2.0)*(-phi/2.0 + (phi**3)/24.0 - (phi**5)/720.0), 
+                            self.g*((cp + 1.0)/2.0)*(-theta/2.0 + (theta**3)/24.0 - (theta**5)/720.),
+                            0.0]])
+        A[3:6, 6:9] = A23
+
+        A24 = np.array([[0.0, -w/2.0, v/2.0],
+                        [w/2.0, 0.0, -u/2.0],
+                        [-v/2.0, u/2.0, 0.0]])
+        A[3:6, 9:12] = A24
+
+        W = np.array([[1.0, sp*st/ct, cp*st/ct],
+                      [0.0, cp, -sp],
+                      [0.0, sp/ct, cp/ct]])
+        A[6:9, 9:12] = W
+
+        A44 = np.array([[0.0, (self.Jy - self.Jz)*r/(2.0*self.Jx), (self.Jy - self.Jz)*q/(2.0*self.Jx)],
+                        [(self.Jz - self.Jx)*r/(2.0*self.Jy), 0.0, (self.Jz - self.Jx)*p/(2.0*self.Jy)],
+                        [(self.Jx - self.Jy)*q/(2.0*self.Jz), (self.Jx - self.Jy)*p/(2.0*self.Jz), 0.0]])
+        A[9:12, 9:12] = A44
+
+        B = np.copy(self.Bc)
+
+        return A, B
+
     def get_SS(self):
         # Unpack state
         pn = self.x[0]
@@ -262,8 +325,8 @@ def make_ref_traj(dt):
         T = 10.0
         steps = int(T/dt)
         xr = np.zeros((12, 30*steps))
-        xr[2, :] = -10.0
-        xr[2, 2*steps:] = 0.0
+        # xr[2, :] = -10.0
+        # xr[2, 2*steps:] = 0.0
     elif traj == 1:
         # Straight up trajectory for 10m, 10seconds
         T = 10.0
@@ -273,10 +336,11 @@ def make_ref_traj(dt):
 
         xr = np.zeros((12, 30*steps))
         xr[2, 0:steps] = -north_steps
+        # xr[5, 0:steps] = -1.0
         xr[2, steps:] = -10.0
     elif traj == 2:
         # Straight north trajectory for 10m, 10seconds
-        T = 4.0
+        T = 6.0
         steps = int(T/dt)
 
         north_steps = np.linspace(0.0, 10.0, steps)
@@ -287,7 +351,7 @@ def make_ref_traj(dt):
         xr[0, steps:] = 10.0
     elif traj == 3:
         # Straight north trajectory for 10m, 10seconds
-        T = 4.0
+        T = 6.0
         steps = int(T/dt)
 
         north_steps = np.linspace(0.0, 10.0, steps)
@@ -317,6 +381,7 @@ def make_ref_traj(dt):
 
         xr = np.zeros((12, 5*steps + 50))
         xr[0, :] = 10.0
+        # xr[2, :] = -10.0
         xr[0, 0:steps] = north_steps
 
         # Make a ciricle of Radius 10
@@ -332,6 +397,7 @@ def make_ref_traj(dt):
         xr[0, steps:5*steps] = north
         xr[1, steps:5*steps] = east
         xr[2, steps:5*steps] = down
+        xr[2, 5*steps:] = -10.0
         # xr[8, steps:5*steps] = theta
 
     return xr
@@ -363,6 +429,7 @@ if __name__ == '__main__':
 
     # Plot results
     PLOT = True
+    ANIMATE = True
     if PLOT:
         x_result = np.zeros((12,1))
 
@@ -393,6 +460,7 @@ if __name__ == '__main__':
             print "pos:", quad.x[0], quad.x[1], quad.x[2], quad.x[5]
             print "rot:", quad.x[6], quad.x[7], quad.x[8]
             print "Control: ", u
+            time.sleep(0.01)
 
     if PLOT:
         x_result_north = x_result[0,:]
@@ -411,3 +479,11 @@ if __name__ == '__main__':
         plt.axis('equal')
         plt.legend(['Trajectory', 'Result'])
         plt.show()
+
+    if ANIMATE:
+        for i in range(len(x_result[0,:])):
+            quad.x = x_result[:,i]
+            plotter.plot(quad.x)
+            time.sleep(dt)
+
+

@@ -22,8 +22,8 @@ class NMPC(object):
         self.nu = 4 # number of control inputs
         
         # Cost function parameters
-        self.Q = np.eye(12)*0.001
-        # self.Q = np.zeros((12,12))
+        # self.Q = np.eye(12)*0.001
+        self.Q = np.zeros((12,12))
         # Positions
         self.Q[0, 0] = 100.0
         self.Q[1, 1] = 100.0
@@ -34,8 +34,8 @@ class NMPC(object):
         self.Q[8, 8] = 100.0
         # self.Q = np.diag([0.0, 1.0, 1.0, 0.0]) # Matrix for quadratic cost function with state
         # self.R = np.diag([0.001, 0.001, 0.001, 0.001]) # Matrix for quadratic cost function with inputs
-        # self.R = np.eye(4)*1e-5
-        self.R = np.zeros((4,4))
+        self.R = np.eye(4)
+        # self.R = np.zeros((4,4))
 
         # Time parameters
         self.T = 25 # horizon length
@@ -65,6 +65,10 @@ class NMPC(object):
 
         # Get SS representation of dynamics
         A, B = quad.get_SS()
+
+        # Linear
+        # A, B = quad.get_SS_linear()
+
         # C = np.identity(12)
         # D = np.zeros((12,4))
         # cont_sys = control.StateSpace(A, B, C, D)
@@ -78,9 +82,10 @@ class NMPC(object):
 
         # Loop through horizon
         for t in range(self.T):
-            cost += cvxpy.quad_form(x[:, t + 1] - xr[:, t ], self.Q) # This does xT * Q * x
+            cost += cvxpy.quad_form(x[:, t + 1] - xr[:, t + 1 ], self.Q) # This does xT * Q * x
             cost += cvxpy.quad_form(u[:, t], self.R) # This does uT * R * u
-            constr += [x[:, t + 1] == x[:, t] + self.delta_t*(A * x[:, t] + B * (u[:, t] + u_eq))] # Contraint to follow dynamics
+            # constr += [x[:, t + 1] == x[:, t] + self.delta_t*(A * x[:, t] + B * (u[:, t]))] # Contraint to follow dynamics
+            constr += [x[:, t + 1] == x[:, t] + self.delta_t*(A * x[:, t] + B * u[:, t])] # Contraint to follow dynamics
             # constr += [x[:, t + 1] == A * x[:, t] + B * (u[:, t] + u_eq)] # Contraint to follow dynamics
 
             # Contrain angles
@@ -127,27 +132,3 @@ class NMPC(object):
     def get_nparray_from_matrix(self, x):
         return np.array(x).flatten()
 
-    def plot(self):
-        self.pend.plot()
-
-def main():
-    # Instantiate controller
-    mpc = NMPC()
-
-    # Constant force and dt
-    u = 0.
-    dt = 0.05
-
-    # Loop through timesteps
-    for i in range(0, 500):
-        # Compute control
-        u = mpc.compute_control(u)
-
-        # Simulate dynamics
-        mpc.pend.simulate(u, dt)
-
-        # plot pend
-        mpc.plot()
-
-if __name__ == '__main__':
-    main()

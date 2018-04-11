@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # Python controller for landing a multirotor using relative estimates
 
-import rospy
+
 from math import *
 import numpy as np
 
